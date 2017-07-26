@@ -93,25 +93,60 @@ func (s *Session) GetInputStatuses() *Request {
 	return NewRequest(s, http.MethodGet, "inputs/status")
 }
 
+// Payload for update/delete concepts of input
+type patchInputsPayload struct {
+	Action string        `json:"action"`
+	Inputs []*patchInput `json:"inputs"`
+}
+
+func newPatchInputsPayload(action string) *patchInputsPayload {
+	return &patchInputsPayload{
+		Action: action,
+		Inputs: make([]*patchInput, 0),
+	}
+}
+
+type patchInput struct {
+	Id   string `json:"id"`
+	Data struct {
+		Concepts []interface{} `json:"concepts"`
+	} `json:"data"`
+}
+
+func newPatchInput(id string) *patchInput {
+	p := &patchInput{Id: id}
+	p.Data.Concepts = make([]interface{}, 0)
+	return p
+}
+
+func (p *patchInput) addConcept(id string, val, ignoreVal bool) {
+	c := map[string]interface{}{
+		"id": id,
+	}
+	if !ignoreVal {
+		if val {
+			c["value"] = 1
+		} else {
+			c["value"] = 0
+		}
+	}
+	p.Data.Concepts = append(p.Data.Concepts, c)
+}
+
 // DeleteInputConcepts remove concepts that were already added to an input.
 func (s *Session) DeleteInputConcepts(id string, concepts []string) *Request {
 
 	// 1. Build a request.
-	r := NewRequest(s, http.MethodPatch, "inputs/"+id+"/data/concepts")
+	r := NewRequest(s, http.MethodPatch, "inputs")
 
 	// 2. Add payload.
-	p := struct {
-		Concepts []*OutputConcept `json:"concepts,omitempty"`
-		Action   string           `json:"action"`
-	}{}
+	p := newPatchInputsPayload("remove")
+	i := newPatchInput(id)
 
 	for _, v := range concepts {
-		oc := &OutputConcept{
-			ID: v,
-		}
-		p.Concepts = append(p.Concepts, oc)
+		i.addConcept(v, false, true)
 	}
-	p.Action = "delete_concepts"
+	p.Inputs = append(p.Inputs, i)
 
 	r.SetPayload(p)
 
@@ -122,27 +157,17 @@ func (s *Session) DeleteInputConcepts(id string, concepts []string) *Request {
 func (s *Session) UpdateInputConcepts(id string, userConcepts map[string]bool) *Request {
 
 	// 1. Build a request.
-	r := NewRequest(s, http.MethodPatch, "inputs/"+id+"/data/concepts")
+	r := NewRequest(s, http.MethodPatch, "inputs")
 
 	// 2. Add payload.
 	// Convert an input map into a map of concepts.
-	var reqConcepts []map[string]interface{}
+	p := newPatchInputsPayload("merge")
+	i := newPatchInput(id)
 
 	for id, value := range userConcepts {
-
-		reqConcepts = append(reqConcepts, map[string]interface{}{
-			"id":    id,
-			"value": value,
-		})
+		i.addConcept(id, value, false)
 	}
-
-	p := struct {
-		Concepts []map[string]interface{} `json:"concepts"`
-		Action   string                   `json:"action"`
-	}{
-		Concepts: reqConcepts,
-		Action:   "merge_concepts",
-	}
+	p.Inputs = append(p.Inputs, i)
 
 	r.SetPayload(p)
 
